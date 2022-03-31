@@ -4,6 +4,21 @@
 #include <Adafruit_LiquidCrystal.h>
 #include <LiquidCrystal_I2C.h>
 
+//bmp180
+#include <Adafruit_Sensor.h>
+#include <Adafruit_BMP085_U.h>
+
+//bmp280
+#include <Adafruit_BMP280.h>
+
+/*
+Scanning...
+I2C device found at address 0x27  LCD
+I2C device found at address 0x50  RTC
+I2C device found at address 0x77  bmp180
+I2C device found at address 0x76  bmp280
+done
+*/
 
 //_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/
 //_/_/_/_/_/_/_/  HARDWARE  _/_/_/_/_/_/_/_/
@@ -30,6 +45,19 @@ const char *monthName[12] = {
   "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"
 };
 
+//for motor
+int door_drive_time_close;
+int door_drive_time_open;
+
+//bmp180
+Adafruit_BMP085_Unified bmp_180 = Adafruit_BMP085_Unified(10085);
+float temperature_bmp180;
+
+//bmp280
+Adafruit_BMP280 bmp_280;
+Adafruit_Sensor *bmp280_temp = bmp_280.getTemperatureSensor();
+
+
 
 //_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/
 //_/_/_/_/_/_/_/  SOFTWARE  _/_/_/_/_/_/_/_/
@@ -53,6 +81,19 @@ int menu_item = 0;
 int menu_level = 0;
 int menu_select = 0;
 
+//lcd
+byte battery[8] = {
+  B01110,
+  B11111,
+  B10001,
+  B10001,
+  B11111,
+  B11111,
+  B11111,
+  B11111,
+};
+
+
 //hardware data
 int door_time_open_hours = 7;
 int door_time_open_minutes = 30;
@@ -70,11 +111,29 @@ void setup() {
   //turn on connection to serial and lcd
   //Serial.begin(9600);
   lcd.begin(20, 4);
+  lcd.createChar(0, battery); 
 
+  bmp_180.begin();
+
+  bmp_280.begin(0x76);
+//  bmp_280.setSampling(Adafruit_BMP280::MODE_NORMAL,     /* Operating Mode. */
+//                  Adafruit_BMP280::SAMPLING_X2,     /* Temp. oversampling */
+//                  Adafruit_BMP280::SAMPLING_X16,    /* Pressure oversampling */
+//                  Adafruit_BMP280::FILTER_X16,      /* Filtering. */
+//                  Adafruit_BMP280::STANDBY_MS_500); /* Standby time. */
+
+  lcd.backlight();
+
+  
   //set pinMode for IO-pins
   pinMode(rotary_clk, INPUT_PULLUP);
   pinMode(rotary_dt, INPUT);
   pinMode(rotary_sw, INPUT);
+  pinMode(motor_a, OUTPUT);
+  pinMode(motor_b, OUTPUT);
+
+  digitalWrite(motor_a, HIGH);
+  digitalWrite(motor_b, HIGH);
 
   //setup for rotary encoder 
   attachInterrupt(digitalPinToInterrupt(rotary_clk), input_handler, CHANGE);
@@ -196,7 +255,36 @@ void draw_screen(){
 }
 
 void draw_dashboard(){
+  lcd.setCursor(0, 0);
+  lcd.print("HOME");
   lcd_print_time();
+  lcd.setCursor(12, 2);
+  lcd.write(0);
+  lcd.print(" ");
+  float bat_voltage = (float) map(analogRead(0), 510, 641, 110, 140);
+  lcd.print(bat_voltage/10, 1);
+  //lcd.print(analogRead(0));
+  lcd.print("V");
+
+  //update temp
+  sensors_event_t temp_event_bmp280;
+  bmp280_temp->getEvent(&temp_event_bmp280);
+  
+  sensors_event_t temp_event_bmp180;
+  bmp_180.getEvent(&temp_event_bmp180);
+  bmp_180.getTemperature(&temperature_bmp180);
+
+  //display temperature
+  lcd.setCursor(1, 2);
+  lcd.print("OUT ");
+  lcd.print(temperature_bmp180, 1);
+  lcd.print((char)223); //degree symbol
+  lcd.print("C");
+  lcd.setCursor(1, 3);
+  lcd.print("IN  ");
+  lcd.print(temp_event_bmp280.temperature, 1);
+  lcd.print((char)223); //degree symbol
+  lcd.print("C");
 }
 
 void draw_menu(){
@@ -311,25 +399,36 @@ void draw_menu_1(){
 
 void draw_menu_2(){
   lcd.setCursor(0,0);
-  lcd.print("VENTILATION");
+  lcd.print("DOOR MANUAL");
   switch(menu_level){
     case 0:
+      lcd.setCursor(0,2);
+      lcd.print(" CLOSE DOOR");
+      lcd.setCursor(0,3);
+      lcd.print(" OPEN DOOR");
       break;
     case 1:
       lcd.setCursor(0,2);
       if(menu_select == 0){lcd.print(">");}else lcd.print(" ");
+      lcd.print("CLOSE DOOR");
       lcd.setCursor(0,3);
       if(menu_select == 1){lcd.print(">");}else lcd.print(" ");
+      lcd.print("OPEN DOOR");
       break;
     case 2:
       switch(menu_select){
           case 0:
+            close_door();
+            go_to_dashboard();
             //set_ventilation_temp();                                      
             break;
           case 1:
+            open_door();
+            go_to_dashboard();
             //set_ventilation_time();
             break;
         }
+        
       break;
   }
 }
@@ -549,26 +648,54 @@ void go_to_dashboard(){
   menu_select = 0;
 }
 
-//TIME _/_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/
-void update_time(){
-  RTC.read(tm);
-}
-
-void lcd_print_time(){
-  lcd.setCursor(0,0);
-  lcd.print(print_two_digits(tm.Hour));
-  lcd.print(":");
-  lcd.print(print_two_digits(tm.Minute));
-  lcd.print(" UHR");
-  lcd.setCursor(12, 0);
-  lcd.print(print_two_digits(tm.Day));
-  lcd.print("/");
-  lcd.print(monthName[tm.Month - 1]);
-}
-
 int print_two_digits(int times){
   if(times < 10){
     lcd.print("0");
   }
   return times;
 }
+
+
+//TIME _/_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/
+void update_time(){
+  RTC.read(tm);
+}
+
+void lcd_print_time(){
+  lcd.setCursor(15,0);
+  lcd.print(print_two_digits(tm.Hour));
+  lcd.print(":");
+  lcd.print(print_two_digits(tm.Minute));
+  //lcd.print(" UHR");
+  //lcd.setCursor(12, 0);
+  //lcd.print(print_two_digits(tm.Day));
+  //lcd.print("/");
+  //lcd.print(monthName[tm.Month - 1]);
+}
+
+
+//HARDWARE CTRL _/_/_/_/_/_/_/_/_/_/_/_/
+void close_door(){
+  door_drive_time_close = millis() + 5000;
+  digitalWrite(motor_a, LOW);
+  lcd. clear();
+  lcd.setCursor(1, 1);
+  lcd.print("CLOSING...");
+  while(/*door_drive_time_close > millis()*/true){
+    if(door_drive_time_close < millis()) break;
+  }
+  digitalWrite(motor_a, HIGH);
+}
+
+void open_door(){
+  door_drive_time_open = millis() + 5000;
+  digitalWrite(motor_b, LOW);
+  lcd. clear();
+  lcd.setCursor(1, 1);
+  lcd.print("OPENING...");
+  while(/*door_drive_time_close > millis()*/true){
+    if(door_drive_time_open < millis()) break;
+  }
+  digitalWrite(motor_b, HIGH);
+}
+  
