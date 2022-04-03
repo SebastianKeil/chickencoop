@@ -57,7 +57,10 @@ float temperature_bmp180;
 Adafruit_BMP280 bmp_280;
 Adafruit_Sensor *bmp280_temp = bmp_280.getTemperatureSensor();
 
-
+//endstops
+#define endstop_open 6
+#define endstop_close 7
+#define adjust_closing 3
 
 //_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/
 //_/_/_/_/_/_/_/  SOFTWARE  _/_/_/_/_/_/_/_/
@@ -131,6 +134,8 @@ void setup() {
   pinMode(rotary_sw, INPUT);
   pinMode(motor_a, OUTPUT);
   pinMode(motor_b, OUTPUT);
+  pinMode(endstop_open, INPUT);
+  pinMode(endstop_close, INPUT);
 
   digitalWrite(motor_a, HIGH);
   digitalWrite(motor_b, HIGH);
@@ -246,7 +251,7 @@ void draw_screen(){
   //lcd.clear();
   if(dashboard_active){
     draw_dashboard();
-    delay(500);
+    delay(1000);
   } else{
     draw_menu();
   }
@@ -310,6 +315,8 @@ void draw_menu(){
 void draw_menu_0(){
   lcd.setCursor(0,0);
   lcd.print("DOOR TIME");
+  lcd.setCursor(15,0);
+  lcd.print("Oooooo");
 
   switch(menu_level){
     case 0:
@@ -345,12 +352,13 @@ void draw_menu_0(){
     case 2:
       switch(menu_select){
         case 0:
-          set_door_open_time();                                      
+          set_door_open_time();                                    
           break;
         case 1:
           set_door_close_time();
           break;
       }
+      go_to_dashboard();  
       break;
   }
  
@@ -359,6 +367,9 @@ void draw_menu_0(){
 void draw_menu_1(){
   lcd.setCursor(0,0);
   lcd.print("SYSTEM TIME");
+  lcd.setCursor(15,0);
+  lcd.print("oOooo");
+  
   switch(menu_level){
     case 0:
       lcd.setCursor(0,2);
@@ -400,6 +411,9 @@ void draw_menu_1(){
 void draw_menu_2(){
   lcd.setCursor(0,0);
   lcd.print("DOOR MANUAL");
+  lcd.setCursor(15,0);
+  lcd.print("ooOoo");
+  
   switch(menu_level){
     case 0:
       lcd.setCursor(0,2);
@@ -435,7 +449,10 @@ void draw_menu_2(){
 
 void draw_menu_3(){
   lcd.setCursor(0,0);
-  lcd.print("DEFENSE SYSTEM");
+  lcd.print("DEFENSE");
+  lcd.setCursor(15,0);
+  lcd.print("oooOo");
+  
   switch(menu_level){
     case 0:
       lcd.setCursor(0,2);
@@ -467,7 +484,10 @@ void draw_menu_3(){
 
 void draw_menu_4(){
   lcd.setCursor(0,0);
-  lcd.print("DATA CONNECTION");
+  lcd.print("CONNECTION");
+  lcd.setCursor(15,0);
+  lcd.print("ooooO");
+  
   switch(menu_level){
     case 0:
       lcd.setCursor(0,2);
@@ -601,7 +621,7 @@ void set_door_open_time(){
     lcd.print(":");
     lcd.print(print_two_digits(door_time_open_minutes));
   }
-  go_to_dashboard();
+  input_switch = false; 
 }
 
 void set_door_close_time(){
@@ -637,14 +657,15 @@ void set_door_close_time(){
     lcd.print(print_two_digits(door_time_close_hours));
     lcd.print(":");
     lcd.print(print_two_digits(door_time_close_minutes));
-  }
-  go_to_dashboard();   
+  } 
+  input_switch = false; 
 }
 
 void go_to_dashboard(){
   clear_lcd_flag = true;
   dashboard_active = true;
   menu_level = 0;
+  menu_item = 0;
   menu_select = 0;
 }
 
@@ -676,26 +697,36 @@ void lcd_print_time(){
 
 //HARDWARE CTRL _/_/_/_/_/_/_/_/_/_/_/_/
 void close_door(){
-  door_drive_time_close = millis() + 5000;
   digitalWrite(motor_a, LOW);
   lcd. clear();
   lcd.setCursor(1, 1);
   lcd.print("CLOSING...");
-  while(/*door_drive_time_close > millis()*/true){
-    if(door_drive_time_close < millis()) break;
+  while(!input_switch && digitalRead(endstop_close)){
+    delay(100);
   }
+  if(input_switch) input_switch = false;
+  if(digitalRead(!endstop_close)) close_door(adjust_closing);
+  digitalWrite(motor_a, HIGH);
+}
+
+void close_door(int adjust){
+  digitalWrite(motor_a, LOW);
+  lcd. clear();
+  lcd.setCursor(1, 1);
+  lcd.print("CLOSING...");
+  delay(adjust * 1000);
   digitalWrite(motor_a, HIGH);
 }
 
 void open_door(){
-  door_drive_time_open = millis() + 5000;
   digitalWrite(motor_b, LOW);
   lcd. clear();
   lcd.setCursor(1, 1);
   lcd.print("OPENING...");
-  while(/*door_drive_time_close > millis()*/true){
-    if(door_drive_time_open < millis()) break;
+  while(!input_switch && !digitalRead(endstop_open)){
+    delay(100);
   }
+  if(input_switch) input_switch = false;
   digitalWrite(motor_b, HIGH);
 }
   
