@@ -3,6 +3,10 @@
 #include <Wire.h>
 #include <TimeLib.h>
 #include <DS1307RTC.h>
+#include <Adafruit_NeoPixel.h>
+#ifdef __AVR__
+ #include <avr/power.h> // Required for 16 MHz Adafruit Trinket
+#endif
 
 //for bottons
 #define BOTTON_green 8
@@ -13,8 +17,13 @@
 #define motor_b 11
 
 //endstops door
-#define endstop_not_open 6
-#define endstop_not_close 7
+#define endstop_not_open 7
+#define endstop_not_close 6
+
+//for lamp with neopixel
+#define neopixels 9
+#define NUMPIXEL 18
+Adafruit_NeoPixel pixels(NUMPIXEL, neopixels, NEO_GRB + NEO_KHZ800);
 
 int incomingByte = 0; // for incoming serial data
 
@@ -35,6 +44,7 @@ int incomingByte = 0; // for incoming serial data
 
 //monthlySunrise format: [start hour, start minute, weekly change]
 int monthlySunrises[12][3] = {
+  //{11, 2, 0}, //->10:17
   {8, 17, -7},
   {7, 48, -13},
   {6, 53, -14},
@@ -50,6 +60,7 @@ int monthlySunrises[12][3] = {
 };
 
 int monthlySunsets[12][3] = {
+  //{9, 30, 0}, //->10:15
   {16, 04, 12},
   {16, 53, 13},
   {17, 46, 14},
@@ -64,6 +75,10 @@ int monthlySunsets[12][3] = {
   {15, 58, 1}
 };
 
+#define DOOR_CLOSING_OFFSET 45
+#define DOOR_OPENING_OFFSET 45
+#define LAMP_ON_OFFSET -45
+#define LAMP_OFF_OFFSET 45
 //for RTC (real time clock)
 tmElements_t tm;
 int _hour;
@@ -80,7 +95,148 @@ int hour_bias;
 
 //for Hardware Control
 enum motion {UP, DOWN};
-motion door_status;
+motion door_status = UP;
+
+enum light {ON, OFF};
+light lamp_status = OFF;
+
+int r;
+int g;
+int b;
+
+
+//_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/
+//_/_/_/_/_/_/_/PRINTERS_/_/_/_/_/_/_/_/_/_/
+//_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/
+
+void show_sunrises(){
+  for(int i = 0; i < 12; i++){
+    Serial.print("Month: ");
+    Serial.println((i + 1));
+    for(int j = 0; j < 4; j++){
+      Serial.print(".....");
+      Serial.print("Week ");
+      Serial.println((j + 1));  
+
+      Serial.print(".....");
+      Serial.print(".....");
+      
+      int min = monthlySunrises[i][1] + j * monthlySunrises[i][2];
+      int bias = 0;            
+      if(min < 0){
+        bias = -1;
+        min = min + 60;
+      }else if(min > 59){
+        bias = 1;
+        min = min - 60;
+      }
+      Serial.print(monthlySunrises[i][0] + bias);
+      Serial.print(":");
+      Serial.println(min);
+
+    }
+  }
+}
+
+void show_sunsets(){
+  for(int i = 0; i < 12; i++){
+    Serial.print("Month: ");
+    Serial.println((i + 1));
+    for(int j = 0; j < 4; j++){
+      Serial.print(".....");
+      Serial.print("Week ");
+      Serial.println((j + 1));  
+
+      Serial.print(".....");
+      Serial.print(".....");
+      
+      int min = monthlySunsets[i][1] + j * monthlySunsets[i][2];
+      int bias = 0;            
+      if(min < 0){
+        bias = -1;
+        min = min + 60;
+      }else if(min > 59){
+        bias = 1;
+        min = min - 60;
+      }
+      Serial.print(monthlySunsets[i][0] + bias);
+      Serial.print(":");
+      Serial.println(min);
+
+    }
+  }
+}
+
+void print_time(){
+  Serial.print(tm.Hour);
+  Serial.print(":");
+  Serial.println(tm.Minute);
+
+  // Serial.print(tm.Day);
+  // Serial.print("/");
+  // Serial.println(tm.Month);
+}
+
+void print_sun_times(){
+  calculate_current_sunrise();
+  calculate_current_sunset();
+
+  Serial.print("current sunrise: ");
+  Serial.print(current_sunrise_hour);
+  Serial.print(":");
+  Serial.println(current_sunrise_min);
+
+  Serial.print("current sunset: ");
+  Serial.print(current_sunset_hour);
+  Serial.print(":");
+  Serial.println(current_sunset_min);
+}
+
+void print_all_calculations(){
+  for(int i = 0; i < 12; i++){
+    Serial.println("_/_/_/_/_/_/_/_/_/_/_/_/"); 
+    Serial.print("Month: ");
+    Serial.println(i + 1);
+    for(int j = 0; j < 31; j = j + 7){
+      _month = 1 + i;
+      _day = j + 1;
+
+      Serial.print(".....");
+      Serial.print("Day: ");
+      Serial.println(_day);
+       
+      print_sun_times();
+      Serial.println("_/_/_/_/_/_/_/_/_/_/_/_/"); 
+    }
+  }
+}
+
+void print_current_sunrise(){
+  calculate_current_sunrise();
+  Serial.print("sunrise: ");
+  Serial.print(current_sunrise_hour);
+  Serial.print(":");
+  Serial.println(current_sunrise_min); 
+}
+
+void print_current_sunset(){
+  calculate_current_sunrise();
+  Serial.print("sunset: ");
+  Serial.print(current_sunset_hour);
+  Serial.print(":");
+  Serial.println(current_sunset_min); 
+}
+
+void print_min_around_sunset(){
+  Serial.print("min_to_sunset: ");
+  Serial.println(min_to_sunset());
+
+  Serial.print("min_after_sunset: ");
+  Serial.println(min_after_sunset());
+
+  Serial.print("min_to_sunrise: ");
+  Serial.println(min_to_sunrise());
+}
 
 
 //_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/
@@ -91,16 +247,16 @@ void setup() {
   Serial.begin(9600);
   while (!Serial){};
 
+  pixels.begin();
+
   pinMode(motor_a, OUTPUT);
   pinMode(motor_b, OUTPUT);
   pinMode(endstop_not_open, INPUT_PULLUP);
   pinMode(endstop_not_close, INPUT_PULLUP);  
 
-  //show_sunrises();
+  // show_sunrises();
+  // show_sunsets();
   //print_all_calculations();
-  
-  update_time();
-  print_time();
   
   stop_door();
 }
@@ -136,6 +292,26 @@ void open_door(){
   digitalWrite(motor_b, HIGH);
   door_status = UP;
   Serial.println("DOOR IS OPEN!");
+}
+
+void check_for_command(){
+  incomingByte = 0;  
+  if (Serial.available() > 0) {
+    incomingByte = Serial.read();
+  }
+
+  switch(incomingByte){
+    case 0:
+      break;      
+    case -1:
+      break;      
+    case 49: //1
+      close_door();
+      break;
+    case 50: //2
+      open_door();
+      break;  
+  }
 }
 
 //TIME _/_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/
@@ -174,107 +350,87 @@ void calculate_current_sunrise(){
   current_sunrise_min = this_min;
 }
 
-bool moment_of_sunset(){
-  calculate_current_sunset();
-  if(current_sunset_hour == _hour && current_sunset_min == _min){
-    return true;
-  }else return false;
+int calculate_diff_min(int hour1, int hour2, int min1, int min2){
+  int hour_diff = hour1 - hour2;
+  int min_diff = min1 - min2;
+
+  if(min_diff < 0 && hour_diff > 0){
+    hour_diff--;
+    min_diff = 60 + min_diff;
+  }
+  return hour_diff * 60 + min_diff;
 }
 
-bool moment_of_sunrise(){
+int min_after_sunset(){
+  //print_current_sunset();
+  calculate_current_sunset();
+  return calculate_diff_min(_hour, current_sunset_hour, _min, current_sunset_min);
+}
+
+int min_to_sunset(){
+  //print_current_sunset();
+  calculate_current_sunset();
+  return calculate_diff_min(current_sunset_hour, _hour, current_sunset_min, _min);
+}
+
+int min_to_sunrise(){
+  //print_current_sunrise();
   calculate_current_sunrise();
-  if(current_sunrise_hour == _hour && current_sunrise_min == _min){
-    return true;
-  }else return false;
+  return calculate_diff_min(current_sunrise_hour, _hour, current_sunrise_min, _min);
 }
 
 void check_door_action(){
+  // Serial.print("Checking door, status: ");
+  // Serial.println(door_status);
+
   switch(door_status){
     case UP: 
-      if(moment_of_sunset()){
+      if(min_after_sunset() == DOOR_CLOSING_OFFSET){
         close_door();
       }
       break;
     case DOWN:
-      if(moment_of_sunrise()){
+      if(min_to_sunrise() == DOOR_OPENING_OFFSET){
         open_door();
       }
       break;
   }
 }
 
-void show_sunrises(){
-  for(int i = 0; i < 12; i++){
-    Serial.print("Month: ");
-    Serial.println((i + 1));
-    for(int j = 0; j < 4; j++){
-      Serial.print(".....");
-      Serial.print("Week ");
-      Serial.println((j + 1));  
+//for lamp
+void set_lamp(int intensity){
+  if(intensity == -1) {
+    r = 0;
+    g = 0;
+    b = 0;    
+  }else if(intensity > 15){
+    r = map(intensity, 0, 90, 150, 255);
+    g = map(intensity, 0, 90, 20, 255);
+    b = map(intensity, 0, 90, 0, 100);
+  }else{
+    r = map(intensity, 0, 90, 20, 255);
+    g = map(intensity, 0, 90, 0, 255);
+    b = 0;
+  }
+  for(int i = 0; i < NUMPIXEL; i++){
+    pixels.setPixelColor(i, pixels.Color(r, g, b)); //RGB!
+  }
+  pixels.show();
+}
 
-      Serial.print(".....");
-      Serial.print(".....");
-      
-      int min = monthlySunrises[i][1] + j * monthlySunrises[i][2];
-      int bias = 0;            
-      if(min < 0){
-        bias = -1;
-        min = min + 60;
-      }else if(min > 59){
-        bias = 1;
-        min = min - 60;
-      }
-      Serial.print(monthlySunrises[i][0] + bias);
-      Serial.print(":");
-      Serial.println(min);
-
-    }
+void check_lamp_action(){
+  if(min_after_sunset() > LAMP_ON_OFFSET && min_after_sunset() < LAMP_OFF_OFFSET){ //LAMP_ON_OFFSET < min_after_sunset() < LAMP_OFF_OFFSET
+    set_lamp(45 - min_after_sunset());
+  }else{
+    set_lamp(-1);
   }
 }
 
-void print_time(){
-  Serial.print("tm.Hour: ");
-  Serial.print(tm.Hour);
-  Serial.print("tm.Minute: ");
-  Serial.println(tm.Minute);
-  Serial.print("tm.Day: ");
-  Serial.println(tm.Day);
-  Serial.print("tm.Month: ");
-  Serial.println(tm.Month);
-}
-
-void print_sun_times(){
-  calculate_current_sunrise();
-  calculate_current_sunset();
-
-  Serial.print("current sunrise: ");
-  Serial.print(current_sunrise_hour);
-  Serial.print(":");
-  Serial.println(current_sunrise_min);
-
-  Serial.print("current sunset: ");
-  Serial.print(current_sunset_hour);
-  Serial.print(":");
-  Serial.println(current_sunset_min);
-}
-
-void print_all_calculations(){
-  for(int i = 0; i < 12; i++){
-    Serial.println("_/_/_/_/_/_/_/_/_/_/_/_/"); 
-    Serial.print("Month: ");
-    Serial.println(i + 1);
-    for(int j = 0; j < 31; j = j + 7){
-      _month = 1 + i;
-      _day = j + 1;
-
-      Serial.print(".....");
-      Serial.print("Day: ");
-      Serial.println(_day);
-       
-      print_sun_times();
-      Serial.println("_/_/_/_/_/_/_/_/_/_/_/_/"); 
-    }
-  }
+void test_lamp(){
+  for(int i = 80; i > 0; i--){
+    set_lamp(i);
+    delay(350);
+  }  
 }
 
 //_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/_/
@@ -283,26 +439,17 @@ void print_all_calculations(){
 
 void loop() {  
   stop_door();
+
   update_time();
+  print_time();
+  print_min_around_sunset();
 
-  incomingByte = 0;  
-  if (Serial.available() > 0) {
-    incomingByte = Serial.read();
-  }
+  check_for_command();
+  //print_current_sunset();
+  //print_current_sunrise();
 
-  switch(incomingByte){
-    case 0:
-      break;      
-    case -1:
-      break;      
-    case 49:
-      close_door();
-      break;
-    case 50:
-      open_door();
-      break;  
-  }
-  
-  //check_door_action();
-  
+  check_lamp_action();
+  check_door_action();
+
+  delay(1000);
 }
