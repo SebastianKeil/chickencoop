@@ -49,7 +49,7 @@ int monthlySunrises[12][3] = {
   {7, 48, -13},
   {6, 53, -14},
   {6, 41, -16},
-  {5, 35, -11},
+  {5, 35, -11}, //{5, 35, -11},
   {4, 49, 0},
   {4, 47, 12},
   {5, 26, 12},
@@ -61,11 +61,11 @@ int monthlySunrises[12][3] = {
 
 int monthlySunsets[12][3] = {
   //{19, 5, 0}, //->18:35 -> +45
-  {16, 04, 12},
+  {16, 4, 12},
   {16, 53, 13},
   {17, 46, 14},
   {19, 41, 13},
-  {20, 33, 12},
+  {20, 33, 12}, //{20, 33, 12},
   {21, 21, 3},
   {21, 34, -9},
   {21, 1, -16},
@@ -75,8 +75,9 @@ int monthlySunsets[12][3] = {
   {15, 58, 1}
 };
 
+// This defines timings around sunset/sunrise
 #define DOOR_CLOSING_OFFSET 45
-#define DOOR_OPENING_OFFSET 45
+#define DOOR_OPENING_OFFSET 59
 #define LAMP_ON_OFFSET -15
 #define LAMP_OFF_OFFSET 45
 
@@ -236,7 +237,7 @@ void print_min_around_sunset(){
   Serial.println(min_after_sunset());
 
   Serial.print("min_to_sunrise: ");
-  Serial.println(min_to_sunrise());
+  (min_to_sunrise());
 }
 
 
@@ -447,13 +448,13 @@ void loop() {
 
   update_time();
   print_time();
-  print_min_around_sunset();
+  //print_min_around_sunset();
 
   check_for_command();
-  //print_current_sunset();
-  //print_current_sunrise();
+  print_current_sunset();
+  print_current_sunrise();
 
-  check_lamp_action();
+  //check_lamp_action();
   check_door_action();
 
   //test_lamp();
